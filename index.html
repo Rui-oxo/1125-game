@@ -301,10 +301,29 @@
       cursor: grabbing;
     }
 
-    /* ドラッグ中の元コマ・ゴースト・ホバー枠 */
+    /* ドラッグ中の元コマ（残像を残さず完全に非表示にして手で持ち上げた状態にする） */
     .piece.dragging-source {
-      opacity: 0.35 !important;
-      filter: grayscale(0.2);
+      visibility: hidden !important;
+      opacity: 0 !important;
+    }
+
+    /* マス内のコマのタッチ・ドラッグ判定をマス全体に拡張 */
+    .cell .piece::before {
+      content: '';
+      position: absolute;
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -50%);
+      width: 86px;
+      height: 86px;
+      border-radius: 12px;
+      z-index: 1;
+    }
+    @media (max-width: 400px) {
+      .cell .piece::before {
+        width: 72px;
+        height: 72px;
+      }
     }
     .dragging-ghost {
       position: fixed;
@@ -965,10 +984,22 @@
         cell.innerHTML = '';
         cell.className = 'cell';
 
-        // コマの描画（一番上のみ表示）
+        // コマの描画
         if (stack.length > 0) {
+          // 下にあるコマもDOMに配置（上のコマを持ち上げた際に下が見えるようにする）
+          if (stack.length > 1) {
+            const underPiece = stack[stack.length - 2];
+            const underEl = createPieceEl(underPiece);
+            underEl.style.position = 'absolute';
+            underEl.style.zIndex = '1';
+            underEl.style.pointerEvents = 'none';
+            cell.appendChild(underEl);
+          }
+
           const topPiece = stack[stack.length - 1];
           const pieceEl = createPieceEl(topPiece);
+          pieceEl.style.position = 'relative';
+          pieceEl.style.zIndex = '2';
           cell.appendChild(pieceEl);
 
           // 重なりバッジ
@@ -991,10 +1022,9 @@
               size: topPiece.size,
               r: r,
               c: c,
-              pieceObj: topPiece,
-              targetEl: pieceEl
+              pieceObj: topPiece
             };
-            setupPieceDrag(cell, dragData);
+            setupPieceDrag(pieceEl, dragData);
           }
         }
       });
@@ -1119,22 +1149,19 @@
       });
     }
 
-    function setupPieceDrag(triggerEl, pieceData) {
-      triggerEl.addEventListener('pointerdown', (e) => {
+    function setupPieceDrag(pieceEl, pieceData) {
+      pieceEl.addEventListener('pointerdown', (e) => {
         if (e.button !== 0 && e.pointerType === 'mouse') return;
         if (Game.gameOver || Game.isCpuThinking) return;
         if (pieceData.player !== Game.activePlayer) return;
         if (Game.mode === 'cpu' && pieceData.player !== 1) return;
 
         e.preventDefault();
-        try { triggerEl.setPointerCapture(e.pointerId); } catch(err) {}
-
-        const visualEl = pieceData.targetEl || triggerEl;
+        try { pieceEl.setPointerCapture(e.pointerId); } catch(err) {}
 
         dragContext = {
           pointerId: e.pointerId,
-          triggerEl: triggerEl,
-          visualEl: visualEl,
+          pieceEl: pieceEl,
           pieceData: pieceData,
           from: pieceData.from,
           startX: e.clientX,
@@ -1150,7 +1177,8 @@
         ghostEl.style.top = `${e.clientY}px`;
         document.body.appendChild(ghostEl);
 
-        visualEl.classList.add('dragging-source');
+        // 持ち上げたコマを即座に非表示にし、残像を残さない
+        pieceEl.classList.add('dragging-source');
         sound.playSelect();
 
         const onPointerMove = (moveEvt) => {
@@ -1165,16 +1193,16 @@
         const onPointerUp = (upEvt) => {
           if (!dragContext || upEvt.pointerId !== dragContext.pointerId) return;
 
-          triggerEl.removeEventListener('pointermove', onPointerMove);
-          triggerEl.removeEventListener('pointerup', onPointerUp);
-          triggerEl.removeEventListener('pointercancel', onPointerUp);
-          try { triggerEl.releasePointerCapture(upEvt.pointerId); } catch(err) {}
+          pieceEl.removeEventListener('pointermove', onPointerMove);
+          pieceEl.removeEventListener('pointerup', onPointerUp);
+          pieceEl.removeEventListener('pointercancel', onPointerUp);
+          try { pieceEl.releasePointerCapture(upEvt.pointerId); } catch(err) {}
 
           if (ghostEl) {
             ghostEl.remove();
             ghostEl = null;
           }
-          visualEl.classList.remove('dragging-source');
+          pieceEl.classList.remove('dragging-source');
 
           const targetCell = getCellUnderPoint(upEvt.clientX, upEvt.clientY);
           clearCellHighlights();
@@ -1196,9 +1224,9 @@
           render();
         };
 
-        triggerEl.addEventListener('pointermove', onPointerMove);
-        triggerEl.addEventListener('pointerup', onPointerUp);
-        triggerEl.addEventListener('pointercancel', onPointerUp);
+        pieceEl.addEventListener('pointermove', onPointerMove);
+        pieceEl.addEventListener('pointerup', onPointerUp);
+        pieceEl.addEventListener('pointercancel', onPointerUp);
       });
     }
 
