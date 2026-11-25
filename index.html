@@ -476,6 +476,64 @@
       to { transform: scale(1.04); }
     }
 
+    /* 実況・アナウンスティッカー（中央画面下） */
+    .commentary-box {
+      margin-top: 14px;
+      margin-bottom: 2px;
+      background: linear-gradient(135deg, #37474f, #263238);
+      color: #fff;
+      padding: 7px 16px;
+      border-radius: 20px;
+      box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2), inset 0 1px 1px rgba(255, 255, 255, 0.2);
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      max-width: 480px;
+      width: 100%;
+      border: 2px solid #546e7a;
+      transition: all 0.25s ease;
+    }
+    .commentary-badge {
+      background: #ff5722;
+      color: #fff;
+      font-size: 0.72rem;
+      font-weight: 900;
+      padding: 3px 8px;
+      border-radius: 8px;
+      letter-spacing: 0.5px;
+      white-space: nowrap;
+      animation: livePulse 2s infinite ease-in-out;
+    }
+    @keyframes livePulse {
+      0%, 100% { opacity: 1; }
+      50% { opacity: 0.8; }
+    }
+    .commentary-text {
+      font-size: 0.86rem;
+      font-weight: 800;
+      line-height: 1.35;
+      color: #eceff1;
+      flex: 1;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      transition: all 0.2s;
+    }
+    .commentary-box.reach-alert {
+      border-color: #ff9800;
+      background: linear-gradient(135deg, #422516, #261914);
+      box-shadow: 0 4px 18px rgba(255, 152, 0, 0.45);
+      transform: scale(1.02);
+    }
+    .commentary-box.reach-alert .commentary-badge {
+      background: #f44336;
+      animation: alertPulse 0.6s infinite alternate ease-in-out;
+    }
+    @keyframes alertPulse {
+      from { transform: scale(0.96); }
+      to { transform: scale(1.08); }
+    }
+
     /* 下部フッターアクション */
     .bottom-actions {
       margin-top: 10px;
@@ -701,6 +759,12 @@
     </div>
   </div>
 
+  <!-- 実況・アナウンスティッカー（中央画面下） -->
+  <div class="commentary-box" id="commentary-box">
+    <div class="commentary-badge">🎙️ 実況</div>
+    <div class="commentary-text" id="commentary-text">試合開始！お互いにコマを配置していこう！</div>
+  </div>
+
   <!-- 下部ボタン -->
   <div class="bottom-actions">
     <button class="action-btn" id="reset-btn">🔄 もう一度遊ぶ</button>
@@ -821,6 +885,10 @@
           setTimeout(() => this.playTone(freq, 'sawtooth', 0.25, 0.08), idx * 130);
         });
       }
+      playReach() {
+        this.playTone(659.25, 'triangle', 0.14, 0.12);
+        setTimeout(() => this.playTone(880.00, 'triangle', 0.22, 0.15), 110);
+      }
     }
     const sound = new SoundEngine();
 
@@ -902,7 +970,9 @@
       Game.firstPlayer = Game.activePlayer;
 
       document.getElementById('win-overlay').classList.remove('show');
+      lastReachState = { p1: false, p2: false };
       render();
+      updateCommentary();
 
       if (Game.mode === 'cpu' && Game.activePlayer === 2) {
         triggerCpuTurn();
@@ -1135,6 +1205,128 @@
       return { p1Win, p2Win, winLine };
     }
 
+    // --- 実況・アナウンスシステム ---
+    let lastReachState = { p1: false, p2: false };
+
+    // プレイヤーが「あと1手で勝てる手（リーチ）」を検出
+    function countWinningMoves(player) {
+      const pieces = player === 1 ? Game.p1Pieces : Game.p2Pieces;
+      const moves = getAllLegalMoves(player, Game.board, pieces);
+      const winTargets = new Set();
+
+      for (const m of moves) {
+        const bClone = cloneBoard(Game.board);
+        applySimMove(bClone, m);
+        const res = checkWinner(bClone);
+        if (player === 1 && res.p1Win && !res.p2Win) {
+          winTargets.add(`${m.targetR},${m.targetC}`);
+        } else if (player === 2 && res.p2Win && !res.p1Win) {
+          winTargets.add(`${m.targetR},${m.targetC}`);
+        }
+      }
+      return winTargets.size;
+    }
+
+    function detectReaches() {
+      return {
+        p1Reaches: countWinningMoves(1),
+        p2Reaches: countWinningMoves(2)
+      };
+    }
+
+    function setCommentary(text, isAlert = false) {
+      const box = document.getElementById('commentary-box');
+      const textEl = document.getElementById('commentary-text');
+      if (!box || !textEl) return;
+
+      if (isAlert) {
+        box.classList.add('reach-alert');
+      } else {
+        box.classList.remove('reach-alert');
+      }
+
+      textEl.style.opacity = '0';
+      setTimeout(() => {
+        textEl.textContent = text;
+        textEl.style.opacity = '1';
+      }, 70);
+    }
+
+    function updateCommentary(lastMove = null) {
+      if (Game.gameOver) return;
+
+      const { p1Reaches, p2Reaches } = detectReaches();
+      const isVsCpu = Game.mode === 'cpu';
+      const p1Name = isVsCpu ? 'あなた' : 'プレイヤー1';
+      const p2Name = isVsCpu ? (Game.difficulty === 'oni' ? '👹鬼CPU' : 'CPU') : 'プレイヤー2';
+
+      // リーチ通知音（新規にリーチがかかった時に鳴らす）
+      const p1NewReach = p1Reaches > 0 && !lastReachState.p1;
+      const p2NewReach = p2Reaches > 0 && !lastReachState.p2;
+      if (p1NewReach || p2NewReach) {
+        sound.playReach();
+      }
+      lastReachState = { p1: p1Reaches > 0, p2: p2Reaches > 0 };
+
+      // 1. リーチ判定（最優先アナウンス）
+      if (p1Reaches >= 2) {
+        setCommentary(`🔥 ${p1Name}が怒涛のダブルリーチ！！王手飛車取りだ！`, true);
+        return;
+      }
+      if (p2Reaches >= 2) {
+        setCommentary(`💥 大ピンチ！${p2Name}がダブルリーチ！防ぎきれるか！？`, true);
+        return;
+      }
+      if (p1Reaches === 1 && p2Reaches === 1) {
+        setCommentary(`⚡ お互いにリーチ！どちらが先に揃えるかの超接戦！`, true);
+        return;
+      }
+      if (p1Reaches === 1) {
+        setCommentary(`🔥 ${p1Name}がリーチ！あと1手で決着だ！`, true);
+        return;
+      }
+      if (p2Reaches === 1) {
+        setCommentary(`⚠️ 警戒せよ！${p2Name}がリーチ！阻止しないと危ない！`, true);
+        return;
+      }
+
+      // 2. 直前の指し手に基づく実況
+      if (lastMove) {
+        if (lastMove.isCover) {
+          if (lastMove.player === 1) {
+            setCommentary(`😋 パックン！相手のコマを大胆に飲み込んだ！`);
+          } else {
+            setCommentary(`😱 パックン！${p2Name}にコマを被せられた！`);
+          }
+          return;
+        }
+        if (lastMove.from === 'board') {
+          setCommentary(`🔄 盤上のコマを移動！戦況が大きく動く！`);
+          return;
+        }
+        if (lastMove.size === 3) {
+          setCommentary(`🐘 ドスン！最大サイズの大型コマが登場！盤面を威圧する！`);
+          return;
+        }
+      }
+
+      // 3. 序盤・通常実況
+      let totalPiecesOnBoard = 0;
+      for (let r = 0; r < 3; r++) {
+        for (let c = 0; c < 3; c++) {
+          totalPiecesOnBoard += Game.board[r][c].length;
+        }
+      }
+
+      if (totalPiecesOnBoard <= 1) {
+        setCommentary(`📣 試合開始！まずは中央や角を狙って布陣を整えよう！`);
+      } else if (totalPiecesOnBoard <= 4) {
+        setCommentary(`⚔️ 序盤戦！コマのサイズを見極めて被せる隙を伺え！`);
+      } else {
+        setCommentary(`🧠 白熱の中盤戦！動かす時は下のコマをよく確認しよう！`);
+      }
+    }
+
     // --- プレイヤー操作 (ドラッグ＆ドロップ) ---
     let dragContext = null;
     let ghostEl = null;
@@ -1290,6 +1482,14 @@
       // 勝敗チェック
       const result = checkWinner();
 
+      // 実況の更新
+      updateCommentary({
+        player: selected.player,
+        size: selected.size,
+        from: selected.from,
+        isCover: isCover
+      });
+
       // 自爆・勝敗の判定
       if (result.p1Win || result.p2Win) {
         handleGameEnd(result, selected.player);
@@ -1329,6 +1529,14 @@
         desc = (mover === 1) 
           ? 'コマを動かしたことで、下に隠れていた相手のラインが現れました！（自爆）' 
           : '相手の3つ並びが完成しました！';
+      }
+
+      const isVsCpu = Game.mode === 'cpu';
+      const p2Name = isVsCpu ? (Game.difficulty === 'oni' ? '👹鬼CPU' : 'CPU') : 'プレイヤー2';
+      if (winner === 1) {
+        setCommentary(`🎉 決着！${isVsCpu ? 'あなた' : 'プレイヤー1'}の見事な勝利！`);
+      } else {
+        setCommentary(`💀 決着！${p2Name}に軍配が上がった…！`);
       }
 
       // ハイライトライン
