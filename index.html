@@ -292,9 +292,34 @@
       align-items: center;
       justify-content: center;
       position: relative;
-      cursor: pointer;
+      cursor: grab;
+      touch-action: none;
       transition: transform 0.2s cubic-bezier(0.34, 1.56, 0.64, 1), box-shadow 0.2s;
       z-index: 2;
+    }
+    .piece:active {
+      cursor: grabbing;
+    }
+
+    /* ドラッグ中の元コマ・ゴースト・ホバー枠 */
+    .piece.dragging-source {
+      opacity: 0.35 !important;
+      filter: grayscale(0.2);
+    }
+    .dragging-ghost {
+      position: fixed;
+      pointer-events: none;
+      z-index: 9999;
+      transform: translate(-50%, -50%) scale(1.18);
+      box-shadow: 0 16px 28px rgba(0,0,0,0.45), 0 0 0 3px #ffd54f !important;
+      cursor: grabbing;
+      transition: none !important;
+    }
+    .cell.drag-hover {
+      background: radial-gradient(circle at 50% 50%, #a5d6a7, #66bb6a) !important;
+      box-shadow: inset 0 0 0 4px #2e7d32, 0 0 18px #43a047 !important;
+      transform: scale(1.06) !important;
+      z-index: 3;
     }
 
     /* サイズ指定 */
@@ -668,22 +693,26 @@
       <div class="modal-title">🌟 あそびかた</div>
       <div class="rule-item">
         <span class="rule-badge">1</span>
-        <div><b>コマの構成：</b> 各プレイヤーは大・中・小のコマを2個ずつ（計6個）持っています。</div>
+        <div><b>操作方法：</b> 手駒や盤上のコマを<b>指やマウスでドラッグ</b>して、置きたいマスまで運んでドロップします！</div>
       </div>
       <div class="rule-item">
         <span class="rule-badge">2</span>
-        <div><b>被せる：</b> 空いているマスだけでなく、<b>より小さいコマの上</b>なら自分・相手問わず被せて置けます！</div>
+        <div><b>コマの構成：</b> 各プレイヤーは大・中・小のコマを2個ずつ（計6個）持っています。</div>
       </div>
       <div class="rule-item">
         <span class="rule-badge">3</span>
-        <div><b>盤上のコマの移動：</b> 手駒を置く代わりに、<b>すでに盤面にある自分のコマ</b>を別のマスへ動かすこともできます。</div>
+        <div><b>被せる：</b> 空いているマスだけでなく、<b>より小さいコマの上</b>なら自分・相手問わず被せて置けます！</div>
       </div>
       <div class="rule-item">
         <span class="rule-badge">4</span>
-        <div><b>自爆に注意！：</b> 盤上のコマを動かした時、下に隠れていた相手のコマが現れて相手の3つ並びが成立すると負けになります！</div>
+        <div><b>盤上のコマの移動：</b> 手駒を置く代わりに、<b>すでに盤面にある自分のコマ</b>をドラッグして別のマスへ動かすこともできます。</div>
       </div>
       <div class="rule-item">
         <span class="rule-badge">5</span>
+        <div><b>自爆に注意！：</b> 盤上のコマを動かした時、下に隠れていた相手のコマが現れて相手の3つ並びが成立すると負けになります！</div>
+      </div>
+      <div class="rule-item">
+        <span class="rule-badge">6</span>
         <div><b>勝利条件：</b> 縦・横・斜めのいずれかに、自分の色のコマを3つ並べた方の勝ちです！</div>
       </div>
       <button class="modal-close" id="modal-close-btn">わかった！</button>
@@ -879,12 +908,14 @@
       const p1Rack = document.getElementById('p1-rack');
       p1Rack.innerHTML = '';
       Game.p1Pieces.forEach(p => {
-        const isSel = Game.selected && Game.selected.from === 'tray' && Game.selected.id === p.id;
-        const pieceEl = createPieceEl(p, isSel);
+        const pieceEl = createPieceEl(p);
         if (!p.used && Game.activePlayer === 1 && !Game.gameOver && !Game.isCpuThinking) {
-          pieceEl.addEventListener('click', (e) => {
-            e.stopPropagation();
-            onTrayPieceClick(p);
+          setupPieceDrag(pieceEl, {
+            from: 'tray',
+            id: p.id,
+            player: p.player,
+            size: p.size,
+            pieceObj: p
           });
         }
         p1Rack.appendChild(pieceEl);
@@ -894,12 +925,14 @@
       const p2Rack = document.getElementById('p2-rack');
       p2Rack.innerHTML = '';
       Game.p2Pieces.forEach(p => {
-        const isSel = Game.selected && Game.selected.from === 'tray' && Game.selected.id === p.id;
-        const pieceEl = createPieceEl(p, isSel);
+        const pieceEl = createPieceEl(p);
         if (!p.used && Game.activePlayer === 2 && !Game.gameOver && !Game.isCpuThinking && Game.mode === 'pvp') {
-          pieceEl.addEventListener('click', (e) => {
-            e.stopPropagation();
-            onTrayPieceClick(p);
+          setupPieceDrag(pieceEl, {
+            from: 'tray',
+            id: p.id,
+            player: p.player,
+            size: p.size,
+            pieceObj: p
           });
         }
         p2Rack.appendChild(pieceEl);
@@ -931,16 +964,10 @@
         cell.innerHTML = '';
         cell.className = 'cell';
 
-        // 置けるマスかチェック
-        if (Game.selected && canDropOn(Game.selected.size, r, c)) {
-          cell.classList.add('can-drop');
-        }
-
         // コマの描画（一番上のみ表示）
         if (stack.length > 0) {
           const topPiece = stack[stack.length - 1];
-          const isSel = Game.selected && Game.selected.from === 'board' && Game.selected.r === r && Game.selected.c === c;
-          const pieceEl = createPieceEl(topPiece, isSel);
+          const pieceEl = createPieceEl(topPiece);
           cell.appendChild(pieceEl);
 
           // 重なりバッジ
@@ -951,15 +978,22 @@
             cell.appendChild(badge);
           }
 
-          // 自分のコマなら持ち上げ選択可能
+          // 自分のコマならドラッグ可能
           const isMyPiece = topPiece.player === Game.activePlayer;
           const isInteractive = !Game.gameOver && !Game.isCpuThinking && (Game.mode === 'pvp' || Game.activePlayer === 1);
-          if (isMyPiece && isInteractive && !isSel) {
+          if (isMyPiece && isInteractive) {
             cell.classList.add('can-select');
+            setupPieceDrag(pieceEl, {
+              from: 'board',
+              id: topPiece.id,
+              player: topPiece.player,
+              size: topPiece.size,
+              r: r,
+              c: c,
+              pieceObj: topPiece
+            });
           }
         }
-
-        cell.onclick = () => onCellClick(r, c);
       });
     }
 
@@ -978,11 +1012,11 @@
 
       if (Game.activePlayer === 1) {
         badge.style.color = 'var(--p1-color)';
-        msg.textContent = Game.selected ? '置くマスを選んでね！' : 'あなたの番です！コマを選んでね';
+        msg.textContent = 'あなたの番です！コマをドラッグしてマスへ運んでね';
       } else {
         badge.style.color = 'var(--p2-color)';
         if (Game.mode === 'pvp') {
-          msg.textContent = Game.selected ? 'プレイヤー2: 置くマスを選んでね' : 'プレイヤー2の番です！';
+          msg.textContent = 'プレイヤー2の番です！コマをドラッグしてね';
         }
       }
     }
@@ -1039,72 +1073,127 @@
       return { p1Win, p2Win, winLine };
     }
 
-    // --- プレイヤー操作 ---
-    function onTrayPieceClick(piece) {
-      if (Game.gameOver || Game.isCpuThinking) return;
-      if (piece.used) return;
-      if (piece.player !== Game.activePlayer) return;
+    // --- プレイヤー操作 (ドラッグ＆ドロップ) ---
+    let dragContext = null;
+    let ghostEl = null;
 
-      // 既に選択されていれば解除
-      if (Game.selected && Game.selected.from === 'tray' && Game.selected.id === piece.id) {
-        Game.selected = null;
-      } else {
-        Game.selected = {
-          from: 'tray',
-          id: piece.id,
-          player: piece.player,
-          size: piece.size,
-          pieceObj: piece
-        };
-        sound.playSelect();
-      }
-      render();
+    function highlightDroppableCells(pieceSize, originPos = null) {
+      const cells = document.querySelectorAll('.cell');
+      cells.forEach(cell => {
+        const r = parseInt(cell.dataset.r, 10);
+        const c = parseInt(cell.dataset.c, 10);
+        if (originPos && originPos.r === r && originPos.c === c) return;
+        if (canDropOn(pieceSize, r, c)) {
+          cell.classList.add('can-drop');
+        }
+      });
     }
 
-    function onCellClick(r, c) {
-      if (Game.gameOver || Game.isCpuThinking) return;
+    function clearCellHighlights() {
+      document.querySelectorAll('.cell').forEach(cell => {
+        cell.classList.remove('can-drop', 'drag-hover');
+      });
+    }
 
-      // 1. コマが既に選択されている状態でマスをクリック -> 配置または移動
-      if (Game.selected) {
-        // 同じ場所をクリックした場合は選択解除
-        if (Game.selected.from === 'board' && Game.selected.r === r && Game.selected.c === c) {
-          Game.selected = null;
-          render();
-          return;
+    function getCellUnderPoint(x, y) {
+      const elements = document.elementsFromPoint(x, y);
+      for (const el of elements) {
+        if (el.classList && el.classList.contains('cell')) {
+          return el;
         }
+      }
+      return null;
+    }
 
-        if (canDropOn(Game.selected.size, r, c)) {
-          executeMove(Game.selected, r, c);
-          return;
+    function updateDragHover(x, y) {
+      const targetCell = getCellUnderPoint(x, y);
+      document.querySelectorAll('.cell').forEach(cell => {
+        if (cell === targetCell && cell.classList.contains('can-drop')) {
+          cell.classList.add('drag-hover');
         } else {
-          // 置けないマスをクリックした時：もしそこにある自分のコマを選択し直す場合
-          const top = getTopPiece(r, c);
-          if (top && top.player === Game.activePlayer) {
-            selectBoardPiece(r, c, top);
-            return;
-          }
+          cell.classList.remove('drag-hover');
         }
-      }
-
-      // 2. コマが未選択の状態で盤面のマスをクリック -> 盤上の自分のコマを選択
-      const top = getTopPiece(r, c);
-      if (top && top.player === Game.activePlayer) {
-        selectBoardPiece(r, c, top);
-      }
+      });
     }
 
-    function selectBoardPiece(r, c, top) {
-      Game.selected = {
-        from: 'board',
-        id: top.id,
-        player: top.player,
-        size: top.size,
-        r: r,
-        c: c,
-        pieceObj: top
-      };
-      sound.playSelect();
-      render();
+    function setupPieceDrag(pieceEl, pieceData) {
+      pieceEl.addEventListener('pointerdown', (e) => {
+        if (e.button !== 0 && e.pointerType === 'mouse') return;
+        if (Game.gameOver || Game.isCpuThinking) return;
+        if (pieceData.player !== Game.activePlayer) return;
+        if (Game.mode === 'cpu' && pieceData.player !== 1) return;
+
+        e.preventDefault();
+        try { pieceEl.setPointerCapture(e.pointerId); } catch(err) {}
+
+        dragContext = {
+          pointerId: e.pointerId,
+          sourceEl: pieceEl,
+          pieceData: pieceData,
+          from: pieceData.from,
+          startX: e.clientX,
+          startY: e.clientY
+        };
+
+        const originPos = pieceData.from === 'board' ? { r: pieceData.r, c: pieceData.c } : null;
+        highlightDroppableCells(pieceData.size, originPos);
+
+        ghostEl = createPieceEl(pieceData);
+        ghostEl.classList.add('dragging-ghost');
+        ghostEl.style.left = `${e.clientX}px`;
+        ghostEl.style.top = `${e.clientY}px`;
+        document.body.appendChild(ghostEl);
+
+        pieceEl.classList.add('dragging-source');
+        sound.playSelect();
+
+        const onPointerMove = (moveEvt) => {
+          if (!dragContext || moveEvt.pointerId !== dragContext.pointerId) return;
+          if (ghostEl) {
+            ghostEl.style.left = `${moveEvt.clientX}px`;
+            ghostEl.style.top = `${moveEvt.clientY}px`;
+          }
+          updateDragHover(moveEvt.clientX, moveEvt.clientY);
+        };
+
+        const onPointerUp = (upEvt) => {
+          if (!dragContext || upEvt.pointerId !== dragContext.pointerId) return;
+
+          pieceEl.removeEventListener('pointermove', onPointerMove);
+          pieceEl.removeEventListener('pointerup', onPointerUp);
+          pieceEl.removeEventListener('pointercancel', onPointerUp);
+          try { pieceEl.releasePointerCapture(upEvt.pointerId); } catch(err) {}
+
+          if (ghostEl) {
+            ghostEl.remove();
+            ghostEl = null;
+          }
+          pieceEl.classList.remove('dragging-source');
+
+          const targetCell = getCellUnderPoint(upEvt.clientX, upEvt.clientY);
+          clearCellHighlights();
+
+          if (targetCell) {
+            const tr = parseInt(targetCell.dataset.r, 10);
+            const tc = parseInt(targetCell.dataset.c, 10);
+            const isSameCell = (dragContext.from === 'board' && dragContext.pieceData.r === tr && dragContext.pieceData.c === tc);
+
+            if (!isSameCell && canDropOn(dragContext.pieceData.size, tr, tc)) {
+              const movingPiece = dragContext.pieceData;
+              dragContext = null;
+              executeMove(movingPiece, tr, tc);
+              return;
+            }
+          }
+
+          dragContext = null;
+          render();
+        };
+
+        pieceEl.addEventListener('pointermove', onPointerMove);
+        pieceEl.addEventListener('pointerup', onPointerUp);
+        pieceEl.addEventListener('pointercancel', onPointerUp);
+      });
     }
 
     // 移動の実行（完全ルール準拠・カジュアル自爆判定）
