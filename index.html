@@ -671,7 +671,7 @@
     <!-- P1 手駒トレイ -->
     <div class="player-tray p1-tray active-turn" id="p1-tray">
       <div class="tray-title p1-text">
-        <span>先手 (あなた)</span>
+        <span id="p1-label">先手 (あなた)</span>
       </div>
       <div class="pieces-rack" id="p1-rack"></div>
     </div>
@@ -830,10 +830,10 @@
       difficulty: 'normal',// 'easy', 'normal', 'oni'
       turnOrder: 'first', // 'first', 'second', 'random'
       activePlayer: 1,    // 1: P1, 2: P2/CPU
+      firstPlayer: 1,     // ゲーム開始時の先手 (1 or 2)
       gameOver: false,
       
       // 盤面 3x3 各マスはコマオブジェクトの配列（スタック）
-      // コマ: { id, player: 1|2, size: 1|2|3 }
       board: [
         [ [], [], [] ],
         [ [], [], [] ],
@@ -844,14 +844,26 @@
       p1Pieces: [],
       p2Pieces: [],
 
-      // 選択中のコマ { from: 'tray' | 'board', player, size, id, r, c, pieceObj }
+      // 選択中のコマ
       selected: null,
       
       isCpuThinking: false
     };
 
+    // CPU思考タイマーのID管理
+    let cpuTimerId = null;
+
+    function clearCpuTimer() {
+      if (cpuTimerId !== null) {
+        clearTimeout(cpuTimerId);
+        cpuTimerId = null;
+      }
+    }
+
     // --- 初期化 ---
     function initGame() {
+      clearCpuTimer();
+
       Game.board = [
         [ [], [], [] ],
         [ [], [], [] ],
@@ -887,6 +899,7 @@
       } else {
         Game.activePlayer = 1;
       }
+      Game.firstPlayer = Game.activePlayer;
 
       document.getElementById('win-overlay').classList.remove('show');
       render();
@@ -969,10 +982,26 @@
         p1Tray.classList.remove('active-turn');
       }
 
-      // P2 ラベル更新
-      document.getElementById('p2-label').textContent = Game.mode === 'cpu' 
-        ? (Game.difficulty === 'oni' ? '後手 (👹鬼CPU)' : '後手 (CPU)')
-        : '後手 (プレイヤー2)';
+      // ラベル更新
+      const p1Label = document.getElementById('p1-label');
+      if (p1Label) {
+        if (Game.mode === 'cpu') {
+          p1Label.textContent = Game.firstPlayer === 1 ? '先手 (あなた)' : '後手 (あなた)';
+        } else {
+          p1Label.textContent = '先手 (プレイヤー1)';
+        }
+      }
+
+      const p2Label = document.getElementById('p2-label');
+      if (p2Label) {
+        if (Game.mode === 'cpu') {
+          const oniPrefix = Game.difficulty === 'oni' ? '👹鬼CPU' : 'CPU';
+          const orderText = Game.firstPlayer === 2 ? '先手' : '後手';
+          p2Label.textContent = `${orderText} (${oniPrefix})`;
+        } else {
+          p2Label.textContent = '後手 (プレイヤー2)';
+        }
+      }
     }
 
     function renderBoard() {
@@ -1277,7 +1306,9 @@
     }
 
     function handleGameEnd(result, mover) {
+      clearCpuTimer();
       Game.gameOver = true;
+      Game.isCpuThinking = false;
       let winner = 0;
       let desc = '';
 
@@ -1331,11 +1362,15 @@
 
     // --- CPU AI 思考ルーチン ---
     function triggerCpuTurn() {
+      clearCpuTimer();
+      if (Game.gameOver || Game.mode !== 'cpu' || Game.activePlayer !== 2) return;
+
       Game.isCpuThinking = true;
       render();
 
       const thinkTime = Game.difficulty === 'oni' ? 700 : 500;
-      setTimeout(() => {
+      cpuTimerId = setTimeout(() => {
+        cpuTimerId = null;
         cpuPlayMove();
         Game.isCpuThinking = false;
         render();
@@ -1416,6 +1451,13 @@
     }
 
     function cpuPlayMove() {
+      // ゲーム終了時や、CPUの手番でない場合は絶対に打たない（ゴーストタイマーの防止）
+      if (Game.gameOver || Game.mode !== 'cpu' || Game.activePlayer !== 2) {
+        Game.isCpuThinking = false;
+        render();
+        return;
+      }
+
       const legalMoves = getAllLegalMoves(2, Game.board, Game.p2Pieces);
       if (legalMoves.length === 0) return;
 
