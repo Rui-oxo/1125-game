@@ -423,8 +423,8 @@
       to { transform: translateY(-14px) scale(1.18); }
     }
 
-    /* 使用済み手駒 */
-    .piece.used {
+    /* 使用済み手駒 (トレイ内) */
+    .player-tray .piece.used {
       opacity: 0.18;
       pointer-events: none;
       filter: grayscale(0.8);
@@ -884,10 +884,11 @@
       updateStatusUI();
     }
 
-    function createPieceEl(piece, isSelected = false) {
+    function createPieceEl(piece, isSelected = false, isTray = false) {
       const el = document.createElement('div');
       const oniClass = (Game.difficulty === 'oni' && piece.player === 2) ? 'oni-piece' : '';
-      el.className = `piece p${piece.player} size-${piece.size} ${oniClass} ${isSelected ? 'selected' : ''} ${piece.used ? 'used' : ''}`;
+      const usedClass = (isTray && piece.used) ? 'used' : '';
+      el.className = `piece p${piece.player} size-${piece.size} ${oniClass} ${isSelected ? 'selected' : ''} ${usedClass}`;
       el.dataset.id = piece.id;
 
       // 目玉と口
@@ -908,7 +909,7 @@
       const p1Rack = document.getElementById('p1-rack');
       p1Rack.innerHTML = '';
       Game.p1Pieces.forEach(p => {
-        const pieceEl = createPieceEl(p);
+        const pieceEl = createPieceEl(p, false, true);
         if (!p.used && Game.activePlayer === 1 && !Game.gameOver && !Game.isCpuThinking) {
           setupPieceDrag(pieceEl, {
             from: 'tray',
@@ -925,7 +926,7 @@
       const p2Rack = document.getElementById('p2-rack');
       p2Rack.innerHTML = '';
       Game.p2Pieces.forEach(p => {
-        const pieceEl = createPieceEl(p);
+        const pieceEl = createPieceEl(p, false, true);
         if (!p.used && Game.activePlayer === 2 && !Game.gameOver && !Game.isCpuThinking && Game.mode === 'pvp') {
           setupPieceDrag(pieceEl, {
             from: 'tray',
@@ -983,15 +984,17 @@
           const isInteractive = !Game.gameOver && !Game.isCpuThinking && (Game.mode === 'pvp' || Game.activePlayer === 1);
           if (isMyPiece && isInteractive) {
             cell.classList.add('can-select');
-            setupPieceDrag(pieceEl, {
+            const dragData = {
               from: 'board',
               id: topPiece.id,
               player: topPiece.player,
               size: topPiece.size,
               r: r,
               c: c,
-              pieceObj: topPiece
-            });
+              pieceObj: topPiece,
+              targetEl: pieceEl
+            };
+            setupPieceDrag(cell, dragData);
           }
         }
       });
@@ -1116,19 +1119,22 @@
       });
     }
 
-    function setupPieceDrag(pieceEl, pieceData) {
-      pieceEl.addEventListener('pointerdown', (e) => {
+    function setupPieceDrag(triggerEl, pieceData) {
+      triggerEl.addEventListener('pointerdown', (e) => {
         if (e.button !== 0 && e.pointerType === 'mouse') return;
         if (Game.gameOver || Game.isCpuThinking) return;
         if (pieceData.player !== Game.activePlayer) return;
         if (Game.mode === 'cpu' && pieceData.player !== 1) return;
 
         e.preventDefault();
-        try { pieceEl.setPointerCapture(e.pointerId); } catch(err) {}
+        try { triggerEl.setPointerCapture(e.pointerId); } catch(err) {}
+
+        const visualEl = pieceData.targetEl || triggerEl;
 
         dragContext = {
           pointerId: e.pointerId,
-          sourceEl: pieceEl,
+          triggerEl: triggerEl,
+          visualEl: visualEl,
           pieceData: pieceData,
           from: pieceData.from,
           startX: e.clientX,
@@ -1144,7 +1150,7 @@
         ghostEl.style.top = `${e.clientY}px`;
         document.body.appendChild(ghostEl);
 
-        pieceEl.classList.add('dragging-source');
+        visualEl.classList.add('dragging-source');
         sound.playSelect();
 
         const onPointerMove = (moveEvt) => {
@@ -1159,16 +1165,16 @@
         const onPointerUp = (upEvt) => {
           if (!dragContext || upEvt.pointerId !== dragContext.pointerId) return;
 
-          pieceEl.removeEventListener('pointermove', onPointerMove);
-          pieceEl.removeEventListener('pointerup', onPointerUp);
-          pieceEl.removeEventListener('pointercancel', onPointerUp);
-          try { pieceEl.releasePointerCapture(upEvt.pointerId); } catch(err) {}
+          triggerEl.removeEventListener('pointermove', onPointerMove);
+          triggerEl.removeEventListener('pointerup', onPointerUp);
+          triggerEl.removeEventListener('pointercancel', onPointerUp);
+          try { triggerEl.releasePointerCapture(upEvt.pointerId); } catch(err) {}
 
           if (ghostEl) {
             ghostEl.remove();
             ghostEl = null;
           }
-          pieceEl.classList.remove('dragging-source');
+          visualEl.classList.remove('dragging-source');
 
           const targetCell = getCellUnderPoint(upEvt.clientX, upEvt.clientY);
           clearCellHighlights();
@@ -1190,9 +1196,9 @@
           render();
         };
 
-        pieceEl.addEventListener('pointermove', onPointerMove);
-        pieceEl.addEventListener('pointerup', onPointerUp);
-        pieceEl.addEventListener('pointercancel', onPointerUp);
+        triggerEl.addEventListener('pointermove', onPointerMove);
+        triggerEl.addEventListener('pointerup', onPointerUp);
+        triggerEl.addEventListener('pointercancel', onPointerUp);
       });
     }
 
@@ -1203,7 +1209,11 @@
       // コマを移動
       if (selected.from === 'tray') {
         selected.pieceObj.used = true;
-        Game.board[targetR][targetC].push({ ...selected.pieceObj });
+        Game.board[targetR][targetC].push({
+          id: selected.id,
+          player: selected.player,
+          size: selected.size
+        });
       } else if (selected.from === 'board') {
         // 元のマスからポップ
         const movedPiece = Game.board[selected.r][selected.c].pop();
